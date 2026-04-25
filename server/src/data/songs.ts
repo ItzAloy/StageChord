@@ -16,26 +16,32 @@ export const songs: Song[] = [
       { id: "s1-outro", name: "Outro", chords: ["G", "G", "A", "C/D", "G", "G", "A", "C/D", "G"] }
     ]
   },
-  {
+{
     id: "song-2",
-    title: "Rayakan KasihMu",
+    title: "Rayakan Kasih-Mu",
     artist: "LOJ Worship",
     key: "E",
     sections: [
-      { id: "s2-verse", name: "Bait", chords: ["E", "C#m", "F#m", "A", "E", "C#m", "F#m", "A", "E"] },
+      { id: "s2-intro", name: "Intro", chords: ["E", "E", "E", "E"] },
+      { id: "s2-verse", name: "Verse (2x)", chords: ["E", "C#m", "F#m", "A", "E"] },
       { id: "s2-pre-chorus", name: "Pre-chorus", chords: ["A", "E", "A", "E", "A", "E", "A", "C#m", "B"] },
-      { id: "s2-chorus", name: "Reff", chords: ["A", "B", "E", "A", "B", "A", "B", "C#m", "F#m", "C#m", "A", "B", "E"] },
-      { id: "s2-outro", name: "Outro", chords: ["D", "A", "E", "D", "A", "E"] }
+      { id: "s2-chorus", name: "Chorus", chords: ["A", "B", "E", "A", "B", "A", "B", "C#m", "F#m", "C#m", "A", "B", "E"] },
+      { id: "s2-interlude", name: "Interlude", chords: ["C", "Am", "Bm", "Em", "C", "Am", "Bm", "C", "Am", "Bm", "Em", "C", "Am", "B", "B"] },
+      { id: "s2-tag", name: "Tag (2x)", chords: ["D", "A", "E"] }
     ]
   },
-  {
+{
     id: "song-3",
     title: "Mengikut Yesus",
-    artist: "GMS Worship",
+    artist: "GMS",
     key: "G",
     sections: [
-      { id: "s3-verse", name: "Bait", chords: ["G", "C", "Em", "D", "G", "C", "Em", "D", "C", "G/B", "Am", "D"] },
-      { id: "s3-chorus", name: "Reff", chords: ["G", "B", "Em", "D", "C", "G/B", "Am", "D", "G", "B", "Em", "D", "C", "G/B", "Am", "D", "G"] }
+      { id: "s4-intro", name: "Intro", chords: ["G", "G", "C", "C", "Em", "G", "C", "C"] },
+      { id: "s4-verse", name: "Verse", chords: ["G", "C/G", "Em", "D", "G", "C/G", "Em", "D", "G/B", "C", "G/B", "Am", "D"] },
+      { id: "s4-chorus", name: "Chorus", chords: ["G", "B", "Em", "G/D", "C", "G/B", "Am", "D", "G", "B", "Em", "G/D", "C", "G/B", "Am", "D", "G"] },
+      { id: "s4-interlude-1", name: "Interlude 1", chords: ["G", "G", "G", "Em/G"] },
+      { id: "s4-interlude-2", name: "Interlude 2 (6x)", chords: ["Em", "C", "G", "D"] },
+      { id: "s4-ending", name: "Ending", chords: ["G", "G", "G"] }
     ]
   }
 ];
