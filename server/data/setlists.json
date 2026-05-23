@@ -9,9 +9,29 @@
         "id": "setlist-1-main",
         "name": "Main Set",
         "songIds": [
+          "song-1",
           "song-2",
-          "song-3",
-          "song-1"
+          "song-3"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "setlist-2",
+    "title": "TEENS",
+    "gigDate": "2026-05-23",
+    "notes": "Default example setlist for tonight's flow.",
+    "groups": [
+      {
+        "id": "setlist-2-main",
+        "name": "Main Set",
+        "songIds": [
+          "song-4",
+          "song-5",
+          "song-6",
+          "song-7",
+          "song-8",
+          "song-9"
         ]
       }
     ]
