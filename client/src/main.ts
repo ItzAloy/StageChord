@@ -474,7 +474,7 @@ const onPlaybackKeyDown = (event: KeyboardEvent): void => {
   }
 };
 
-const onActionClick = async (target: HTMLElement): Promise<void> => {
+const onActionClick = async (event: MouseEvent, target: HTMLElement): Promise<void> => {
   const action = target.dataset.action;
 
   switch (action) {
@@ -496,6 +496,8 @@ const onActionClick = async (target: HTMLElement): Promise<void> => {
       break;
     case "select-song":
       if (target.dataset.songId) {
+        event.preventDefault();
+        event.stopPropagation();
         selectSong(state, target.dataset.songId);
         render();
       }
@@ -531,6 +533,8 @@ const onActionClick = async (target: HTMLElement): Promise<void> => {
       break;
     case "select-setlist":
       if (target.dataset.setlistId) {
+        event.preventDefault();
+        event.stopPropagation();
         selectSetlist(state, target.dataset.setlistId);
         render();
       }
@@ -543,6 +547,8 @@ const onActionClick = async (target: HTMLElement): Promise<void> => {
       break;
     case "add-song-to-setlist":
       if (target.dataset.songId) {
+        event.preventDefault();
+        event.stopPropagation();
         await addSongToActivePlaylist(target.dataset.songId);
       }
       break;
@@ -621,7 +627,7 @@ app.addEventListener("click", async (event) => {
     return;
   }
 
-  await onActionClick(actionable);
+  await onActionClick(event, actionable);
 });
 
 app.addEventListener("input", (event) => {
