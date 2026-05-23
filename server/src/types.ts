@@ -11,3 +11,17 @@ export interface Song {
   key: string;
   sections: SongSection[];
 }
+
+export interface SetlistGroup {
+  id: string;
+  name: string;
+  songIds: string[];
+}
+
+export interface Setlist {
+  id: string;
+  title: string;
+  gigDate: string;
+  notes?: string;
+  groups: SetlistGroup[];
+}

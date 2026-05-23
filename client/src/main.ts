@@ -1,66 +1,37 @@
 import "./style.css";
 
-interface SongSection {
-  id: string;
-  name: string;
-  chords: string[];
-}
-
-interface Song {
-  id: string;
-  title: string;
-  artist: string;
-  key: string;
-  sections: SongSection[];
-}
-
-interface NewSongPayload {
-  title: string;
-  artist: string;
-  key: string;
-  sections: SongSection[];
-}
-
-const NOTES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-
-const FLAT_TO_SHARP: Record<string, string> = {
-  Cb: "B",
-  Db: "C#",
-  Eb: "D#",
-  Fb: "E",
-  Gb: "F#",
-  Ab: "G#",
-  Bb: "A#"
-};
-
-const SPECIAL_EQUIVALENTS: Record<string, string> = {
-  "E#": "F",
-  "B#": "C"
-};
-
-const NASHVILLE_DEGREE_MAP = ["1", "b2", "2", "b3", "3", "4", "#4", "5", "b6", "6", "b7", "7"];
-const API_BASE_URL = "http://localhost:4000";
-const DEFAULT_SECTIONS_JSON = JSON.stringify(
-  [
-    { name: "Intro", chords: ["C", "G", "Am", "F"] },
-    { name: "Verse", chords: ["C", "Em", "F", "G"] }
-  ],
-  null,
-  2
-);
-
-let songs: Song[] = [];
-let currentSongIndex = 0;
-let selectedKey = "C";
-let useNumberNotation = false;
-let isAddSongModalOpen = false;
-let addSongError: string | null = null;
-let addSongFormState = {
-  title: "",
-  artist: "",
-  key: "C",
-  sectionsJson: DEFAULT_SECTIONS_JSON
-};
+import {
+  createSong,
+  createSetlist,
+  deleteSong,
+  fetchSetlists,
+  fetchSongs,
+  updateSetlist,
+  updateSong
+} from "./api";
+import { isValidNoteKey } from "./chords";
+import { renderApp, renderSongLibraryResults } from "./render";
+import {
+  NOTES,
+  createEmptySetlistForm,
+  createEmptySongForm
+} from "./types";
+import type { AppState, Setlist, Song, SongSection } from "./types";
+import {
+  addGroupToSetlist,
+  createNewSetlist,
+  createSongFormFromSong,
+  addSongToPlaylist,
+  getPlaylistSongIds,
+  getSelectedSetlist,
+  removeSongFromAllSetlists,
+  moveSongInPlaylist,
+  removeSongFromPlaylist,
+  selectGroup,
+  selectSong,
+  selectSetlist,
+  syncSelection
+} from "./state";
 
 const app = document.querySelector<HTMLDivElement>("#app");
 
@@ -68,166 +39,76 @@ if (!app) {
   throw new Error("App container was not found.");
 }
 
-const normalizeNote = (note: string): string => {
-  return FLAT_TO_SHARP[note] ?? SPECIAL_EQUIVALENTS[note] ?? note;
+const state: AppState = {
+  songs: [],
+  setlists: [],
+  selectedSongId: null,
+  selectedSetlistId: null,
+  selectedGroupId: null,
+  currentSongIndex: 0,
+  selectedKey: "C",
+  searchQuery: "",
+  sidebarCollapsed: false,
+  presentationTheme: "dark",
+  presentationMode: true,
+  useNumberNotation: false,
+  songModalMode: null,
+  songForm: createEmptySongForm(),
+  setlistModalOpen: false,
+  setlistForm: createEmptySetlistForm(),
+  groupModalOpen: false,
+  groupName: "",
+  statusMessage: null
 };
 
-const getSemitoneShift = (fromKey: string, toKey: string): number => {
-  const fromIndex = NOTES.indexOf(normalizeNote(fromKey));
-  const toIndex = NOTES.indexOf(normalizeNote(toKey));
+let statusTimer: number | undefined;
 
-  if (fromIndex < 0 || toIndex < 0) {
-    return 0;
+const render = (): void => {
+  app.innerHTML = renderApp(state);
+};
+
+const refreshSongLibraryResults = (): void => {
+  const dropdown = app.querySelector<HTMLElement>("[data-song-library-dropdown]");
+  const resultsContainer = app.querySelector<HTMLElement>("[data-song-library-results]");
+
+  if (!dropdown || !resultsContainer) {
+    return;
   }
 
-  return (toIndex - fromIndex + 12) % 12;
-};
+  const search = state.searchQuery.trim();
 
-const transposeChordPart = (part: string, semitones: number): string => {
-  const match = part.match(/^([A-G](?:#|b)?)(.*)$/);
-
-  if (!match) {
-    return part;
+  if (!search.length) {
+    dropdown.classList.add("hidden");
+    resultsContainer.innerHTML = "";
+    return;
   }
 
-  const root = normalizeNote(match[1]);
-  const suffix = match[2];
-  const rootIndex = NOTES.indexOf(root);
+  dropdown.classList.remove("hidden");
+  resultsContainer.innerHTML = renderSongLibraryResults(state, getSelectedSetlist(state));
+};
 
-  if (rootIndex < 0) {
-    return part;
+const setStatus = (message: string): void => {
+  state.statusMessage = message;
+  render();
+
+  if (statusTimer) {
+    window.clearTimeout(statusTimer);
   }
 
-  const targetIndex = (rootIndex + semitones + 12) % 12;
-  return `${NOTES[targetIndex]}${suffix}`;
+  statusTimer = window.setTimeout(() => {
+    state.statusMessage = null;
+    render();
+  }, 2800);
 };
 
-const transposeChord = (chord: string, semitones: number): string => {
-  const cleanChord = chord.trim();
-
-  // Skip number notation such as 1, 5, 6m, 4/5.
-  if (/^\d/.test(cleanChord)) {
-    return chord;
-  }
-
-  const slashSplit = cleanChord.split("/");
-
-  if (slashSplit.length === 1) {
-    return transposeChordPart(cleanChord, semitones);
-  }
-
-  return slashSplit.map((part) => transposeChordPart(part, semitones)).join("/");
+const refreshSongs = async (): Promise<void> => {
+  state.songs = await fetchSongs();
+  syncSelection(state);
 };
 
-const isValidNoteKey = (key: string): boolean => NOTES.includes(normalizeNote(key));
-
-const toNashvilleChordPart = (part: string, referenceKey: string): string => {
-  const match = part.match(/^([A-G](?:#|b)?)(.*)$/);
-
-  if (!match) {
-    return part;
-  }
-
-  const root = normalizeNote(match[1]);
-  const suffix = match[2];
-  const rootIndex = NOTES.indexOf(root);
-  const keyIndex = NOTES.indexOf(normalizeNote(referenceKey));
-
-  if (rootIndex < 0 || keyIndex < 0) {
-    return part;
-  }
-
-  const interval = (rootIndex - keyIndex + 12) % 12;
-  const degree = NASHVILLE_DEGREE_MAP[interval];
-
-  return `${degree}${suffix}`;
-};
-
-const toNashvilleChord = (chord: string, referenceKey: string): string => {
-  const cleanChord = chord.trim();
-
-  if (/^\d/.test(cleanChord)) {
-    return chord;
-  }
-
-  const slashSplit = cleanChord.split("/");
-
-  if (slashSplit.length === 1) {
-    return toNashvilleChordPart(cleanChord, referenceKey);
-  }
-
-  return slashSplit.map((part) => toNashvilleChordPart(part, referenceKey)).join("/");
-};
-
-const transposeSong = (song: Song, targetKey: string): Song => {
-  const semitoneShift = getSemitoneShift(song.key, targetKey);
-
-  return {
-    ...song,
-    sections: song.sections.map((section) => ({
-      ...section,
-      chords: section.chords.map((chord) => transposeChord(chord, semitoneShift))
-    }))
-  };
-};
-
-const convertSongToNashville = (song: Song, referenceKey: string): Song => {
-  return {
-    ...song,
-    sections: song.sections.map((section) => ({
-      ...section,
-      chords: section.chords.map((chord) => toNashvilleChord(chord, referenceKey))
-    }))
-  };
-};
-
-const fetchSongs = async (): Promise<Song[]> => {
-  const response = await fetch(`${API_BASE_URL}/api/songs`);
-
-  if (!response.ok) {
-    throw new Error(`Failed to load songs: ${response.status}`);
-  }
-
-  return (await response.json()) as Song[];
-};
-
-const createSong = async (payload: NewSongPayload): Promise<Song[]> => {
-  const response = await fetch(`${API_BASE_URL}/api/songs`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(payload)
-  });
-
-  if (!response.ok) {
-    const errorBody = (await response.json().catch(() => null)) as { message?: string } | null;
-    throw new Error(errorBody?.message ?? "Failed to add song.");
-  }
-
-  return (await response.json()) as Song[];
-};
-
-const selectSong = (index: number): void => {
-  currentSongIndex = index;
-  const active = songs[currentSongIndex];
-  selectedKey = isValidNoteKey(active.key) ? normalizeNote(active.key) : "C";
-};
-
-const openAddSongModal = (): void => {
-  addSongError = null;
-  addSongFormState = {
-    title: "",
-    artist: "",
-    key: "C",
-    sectionsJson: DEFAULT_SECTIONS_JSON
-  };
-  isAddSongModalOpen = true;
-};
-
-const closeAddSongModal = (): void => {
-  isAddSongModalOpen = false;
-  addSongError = null;
+const refreshSetlists = async (): Promise<void> => {
+  state.setlists = await fetchSetlists();
+  syncSelection(state);
 };
 
 const parseSectionsJson = (jsonText: string): SongSection[] => {
@@ -240,11 +121,14 @@ const parseSectionsJson = (jsonText: string): SongSection[] => {
   const sections = parsed
     .map((entry, index) => {
       const candidate = entry as { name?: unknown; chords?: unknown };
+
       if (typeof candidate.name !== "string" || !Array.isArray(candidate.chords)) {
-        throw new Error(`Section at index ${index} must include name and chords array.`);
+        throw new Error(`Section at index ${index} must include a name and chords array.`);
       }
 
-      const chords = candidate.chords.map((value) => String(value).trim()).filter((value) => value.length > 0);
+      const chords = candidate.chords
+        .map((value) => String(value).trim())
+        .filter((value) => value.length > 0);
 
       if (chords.length === 0) {
         throw new Error(`Section \"${candidate.name}\" must contain at least one chord.`);
@@ -265,309 +149,564 @@ const parseSectionsJson = (jsonText: string): SongSection[] => {
   return sections;
 };
 
-const chunkChords = (chords: string[], rowSize = 4): string[][] => {
-  const rows: string[][] = [];
+const serializeSetlist = (setlist: Setlist): Omit<Setlist, "id"> => ({
+  title: setlist.title,
+  gigDate: setlist.gigDate,
+  notes: setlist.notes,
+  groups: setlist.groups
+});
 
-  for (let i = 0; i < chords.length; i += rowSize) {
-    rows.push(chords.slice(i, i + rowSize));
+const persistActiveSetlist = async (nextSetlist: Setlist): Promise<void> => {
+  state.setlists = await updateSetlist(nextSetlist.id, serializeSetlist(nextSetlist));
+  state.selectedSetlistId = nextSetlist.id;
+  syncSelection(state);
+};
+
+const getActivePlaylistSongIds = (): string[] => {
+  const activeSetlist = getSelectedSetlist(state);
+
+  if (!activeSetlist) {
+    return [];
   }
 
-  return rows;
+  return getPlaylistSongIds(activeSetlist);
 };
 
-const renderChordRows = (chords: string[]): string => {
-  const rows = chunkChords(chords, 4);
+const goToPlaylistSong = (nextIndex: number): void => {
+  const activeSetlist = getSelectedSetlist(state);
 
-  return rows
-    .map(
-      (row) => `
-        <div class="flex flex-wrap items-baseline gap-x-10 gap-y-2 font-mono tracking-widest text-lg md:text-xl text-white">
-          ${row.map((chord) => `<span>${chord}</span>`).join("")}
-        </div>
-      `
-    )
-    .join("");
-};
-
-const render = (): void => {
-  if (songs.length === 0) {
-    app.innerHTML = `<div class="flex h-screen w-screen items-center justify-center p-6"><div class="w-full max-w-3xl rounded-xl border border-neutral-800 bg-neutral-900 p-8 text-center text-neutral-300">Loading songs...</div></div>`;
+  if (!activeSetlist) {
     return;
   }
 
-  const originalSong = songs[currentSongIndex];
-  const transposedSong = transposeSong(originalSong, selectedKey);
-  const displayedSong = useNumberNotation ? convertSongToNashville(transposedSong, selectedKey) : transposedSong;
-  const notationLabel = useNumberNotation ? "Nashville Number" : "Chord";
+  const songIds = getPlaylistSongIds(activeSetlist);
 
-  app.innerHTML = `
-    <main class="h-screen w-screen overflow-hidden p-3 md:p-4">
-      <div class="grid h-full grid-cols-1 gap-3 lg:grid-cols-[18rem_minmax(0,1fr)] animate-fade-in">
-        <aside class="grid h-full grid-rows-[auto_auto_1fr] gap-3 overflow-hidden">
-          <section class="rounded-2xl border border-neutral-800 bg-black p-3">
-            <p class="text-[10px] uppercase tracking-[0.18em] text-neutral-400">Transpose Key</p>
-            <div class="mt-2 grid grid-cols-6 gap-1">
-              ${NOTES.map(
-                (note) => `
-                  <button
-                    type="button"
-                    data-key="${note}"
-                    class="rounded-md border px-1 py-1 text-[11px] font-semibold transition ${
-                      note === selectedKey
-                        ? "border-white bg-white text-black"
-                        : "border-neutral-700 bg-neutral-900 text-white hover:bg-white hover:text-black"
-                    }"
-                  >
-                    ${note}
-                  </button>
-                `
-              ).join("")}
-            </div>
-
-            <label for="number-notation-toggle" class="mt-2 flex cursor-pointer items-center justify-between rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1.5">
-              <span class="text-xs text-neutral-200">Use Number Notation</span>
-              <input id="number-notation-toggle" type="checkbox" class="h-3.5 w-3.5 accent-white" ${useNumberNotation ? "checked" : ""} />
-            </label>
-
-            <div class="mt-2 grid grid-cols-2 gap-2">
-              <button id="next-song" class="rounded-md border border-neutral-700 bg-black px-2 py-1.5 text-xs font-medium text-white transition hover:bg-white hover:text-black">
-                Next Song
-              </button>
-              <button id="open-add-song" class="rounded-md border border-neutral-700 bg-black px-2 py-1.5 text-xs font-medium text-white transition hover:bg-white hover:text-black">
-                Add Song
-              </button>
-            </div>
-          </section>
-
-          <section class="rounded-2xl border border-neutral-800 bg-neutral-900 p-3">
-            <p class="text-[10px] uppercase tracking-[0.18em] text-neutral-400">Now Showing</p>
-            <h1 class="mt-1 truncate text-lg font-semibold text-white">${displayedSong.title}</h1>
-            <p class="truncate text-xs text-neutral-400">${displayedSong.artist}</p>
-            <div class="mt-2 inline-flex items-center gap-2 rounded-md border border-neutral-700 px-2 py-1 text-xs text-neutral-300">
-              <span>Orig Key:</span>
-              <span class="font-medium text-white">${originalSong.key}</span>
-            </div>
-          </section>
-
-          <section class="rounded-2xl border border-neutral-800 bg-neutral-900 p-3 overflow-hidden">
-            <p class="text-[10px] uppercase tracking-[0.18em] text-neutral-400">Song Library</p>
-            <div class="mt-2 space-y-1 overflow-hidden">
-              ${songs
-                .map(
-                  (song, index) => `
-                    <button
-                      type="button"
-                      data-song-index="${index}"
-                      class="w-full rounded-md border px-2 py-1.5 text-left text-xs transition ${
-                        index === currentSongIndex
-                          ? "border-white bg-white text-black"
-                          : "border-neutral-700 bg-black text-white hover:bg-white hover:text-black"
-                      }"
-                    >
-                      <p class="truncate font-semibold">${song.title}</p>
-                      <p class="truncate text-[10px] ${index === currentSongIndex ? "text-neutral-700" : "text-neutral-400"}">${song.artist}</p>
-                    </button>
-                  `
-                )
-                .join("")}
-            </div>
-          </section>
-        </aside>
-
-        <section class="h-full rounded-2xl border border-neutral-800 bg-neutral-900 p-4 md:p-6 overflow-hidden">
-          <div class="mb-3 flex items-center justify-between">
-            <p class="text-xs uppercase tracking-[0.18em] text-neutral-400">Sections</p>
-            <span class="rounded-md border border-neutral-700 px-2 py-1 text-xs text-neutral-300">${notationLabel}</span>
-          </div>
-
-          <div class="grid h-[calc(100%-2.2rem)] grid-cols-2 gap-4 xl:grid-cols-3 content-start overflow-hidden">
-            ${displayedSong.sections
-              .map(
-                (section) => `
-                  <article class="rounded-xl border border-neutral-800 bg-black/20 p-3">
-                    <h2 class="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-neutral-300">${section.name}</h2>
-                    <div class="space-y-3">
-                      ${renderChordRows(section.chords)}
-                    </div>
-                  </article>
-                `
-              )
-              .join("")}
-          </div>
-        </section>
-      </div>
-
-      ${
-        isAddSongModalOpen
-          ? `
-          <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-            <div class="w-full max-w-2xl rounded-2xl border border-neutral-800 bg-neutral-900 p-6 md:p-8">
-              <div class="mb-4 flex items-center justify-between">
-                <h2 class="text-xl font-semibold text-white">Add Song</h2>
-                <button id="close-add-song" class="rounded-md border border-neutral-700 px-3 py-1 text-sm text-white transition hover:bg-white hover:text-black">Close</button>
-              </div>
-
-              <form id="add-song-form" class="space-y-4">
-                <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <input id="song-title" type="text" placeholder="Title" value="${addSongFormState.title.replace(/"/g, "&quot;")}" class="rounded-md border border-neutral-700 bg-black px-3 py-2 text-white outline-none focus:ring-2 focus:ring-white" required />
-                  <input id="song-artist" type="text" placeholder="Artist" value="${addSongFormState.artist.replace(/"/g, "&quot;")}" class="rounded-md border border-neutral-700 bg-black px-3 py-2 text-white outline-none focus:ring-2 focus:ring-white" required />
-                </div>
-
-                <div>
-                  <label for="song-key" class="mb-2 block text-xs uppercase tracking-[0.14em] text-neutral-400">Original Key</label>
-                  <select id="song-key" class="w-full rounded-md border border-neutral-700 bg-black px-3 py-2 text-white outline-none focus:ring-2 focus:ring-white">
-                    ${NOTES.map((note) => `<option value="${note}" ${addSongFormState.key === note ? "selected" : ""}>${note}</option>`).join("")}
-                  </select>
-                </div>
-
-                <div>
-                  <label for="song-sections-json" class="mb-2 block text-xs uppercase tracking-[0.14em] text-neutral-400">Sections JSON</label>
-                  <textarea id="song-sections-json" rows="10" class="w-full rounded-md border border-neutral-700 bg-black px-3 py-2 text-sm text-white outline-none focus:ring-2 focus:ring-white">${addSongFormState.sectionsJson}</textarea>
-                </div>
-
-                ${addSongError ? `<p class="rounded-md border border-neutral-700 bg-black p-3 text-sm text-neutral-200">${addSongError}</p>` : ""}
-
-                <button type="submit" class="w-full rounded-md border border-neutral-700 bg-black px-3 py-2 text-sm font-semibold text-white transition hover:bg-white hover:text-black">
-                  Save Song
-                </button>
-              </form>
-            </div>
-          </div>
-          `
-          : ""
-      }
-    </main>
-  `;
-
-  const keyButtons = document.querySelectorAll<HTMLButtonElement>("[data-key]");
-  const nextSongButton = document.querySelector<HTMLButtonElement>("#next-song");
-  const numberNotationToggle = document.querySelector<HTMLInputElement>("#number-notation-toggle");
-  const songButtons = document.querySelectorAll<HTMLButtonElement>("[data-song-index]");
-  const openAddSongButton = document.querySelector<HTMLButtonElement>("#open-add-song");
-  const closeAddSongButton = document.querySelector<HTMLButtonElement>("#close-add-song");
-  const addSongForm = document.querySelector<HTMLFormElement>("#add-song-form");
-  const songTitleInput = document.querySelector<HTMLInputElement>("#song-title");
-  const songArtistInput = document.querySelector<HTMLInputElement>("#song-artist");
-  const songKeyInput = document.querySelector<HTMLSelectElement>("#song-key");
-  const songSectionsJsonInput = document.querySelector<HTMLTextAreaElement>("#song-sections-json");
-
-  keyButtons.forEach((button) => {
-    button.addEventListener("click", () => {
-      selectedKey = button.dataset.key ?? selectedKey;
-      render();
-    });
-  });
-
-  if (nextSongButton) {
-    nextSongButton.addEventListener("click", () => {
-      selectSong((currentSongIndex + 1) % songs.length);
-      render();
-    });
+  if (songIds.length === 0) {
+    state.currentSongIndex = 0;
+    state.selectedSongId = null;
+    render();
+    return;
   }
 
-  if (numberNotationToggle) {
-    numberNotationToggle.addEventListener("change", () => {
-      useNumberNotation = numberNotationToggle.checked;
-      render();
-    });
+  const clampedIndex = Math.max(0, Math.min(nextIndex, songIds.length - 1));
+  const nextSongId = songIds[clampedIndex] ?? null;
+
+  state.currentSongIndex = clampedIndex;
+  state.selectedSongId = nextSongId;
+
+  const nextSong = nextSongId ? state.songs.find((song) => song.id === nextSongId) : null;
+
+  if (nextSong) {
+    state.selectedKey = nextSong.key;
   }
 
-  songButtons.forEach((button) => {
-    button.addEventListener("click", () => {
-      const targetIndex = Number(button.dataset.songIndex);
+  render();
+};
 
-      if (Number.isNaN(targetIndex)) {
-        return;
-      }
+const goToNextPlaylistSong = (): void => {
+  const songIds = getActivePlaylistSongIds();
 
-      selectSong(targetIndex);
-      render();
-    });
-  });
-
-  if (openAddSongButton) {
-    openAddSongButton.addEventListener("click", () => {
-      openAddSongModal();
-      render();
-    });
+  if (songIds.length === 0) {
+    return;
   }
 
-  if (closeAddSongButton) {
-    closeAddSongButton.addEventListener("click", () => {
-      closeAddSongModal();
-      render();
-    });
+  goToPlaylistSong(state.currentSongIndex + 1);
+};
+
+const goToPreviousPlaylistSong = (): void => {
+  const songIds = getActivePlaylistSongIds();
+
+  if (songIds.length === 0) {
+    return;
   }
 
-  if (songTitleInput) {
-    songTitleInput.addEventListener("input", () => {
-      addSongFormState.title = songTitleInput.value;
-    });
+  goToPlaylistSong(state.currentSongIndex - 1);
+};
+
+const createOrUpdateSong = async (event: SubmitEvent): Promise<void> => {
+  event.preventDefault();
+
+  const titleInput = event.currentTarget instanceof HTMLFormElement ? event.currentTarget.elements.namedItem("title") : null;
+  const artistInput = event.currentTarget instanceof HTMLFormElement ? event.currentTarget.elements.namedItem("artist") : null;
+  const keyInput = event.currentTarget instanceof HTMLFormElement ? event.currentTarget.elements.namedItem("key") : null;
+  const sectionsInput = event.currentTarget instanceof HTMLFormElement ? event.currentTarget.elements.namedItem("sectionsJson") : null;
+
+  if (!(titleInput instanceof HTMLInputElement) || !(artistInput instanceof HTMLInputElement) || !(keyInput instanceof HTMLSelectElement) || !(sectionsInput instanceof HTMLTextAreaElement)) {
+    return;
   }
 
-  if (songArtistInput) {
-    songArtistInput.addEventListener("input", () => {
-      addSongFormState.artist = songArtistInput.value;
-    });
+  const songPayload = {
+    title: titleInput.value.trim(),
+    artist: artistInput.value.trim(),
+    key: keyInput.value.trim(),
+    sections: parseSectionsJson(sectionsInput.value)
+  } satisfies Omit<Song, "id">;
+
+  if (state.songModalMode === "edit" && state.selectedSongId) {
+    const response = await updateSong(state.selectedSongId, songPayload);
+    state.songs = response.songs;
+    selectSong(state, response.song.id);
+    state.selectedKey = response.song.key;
+    state.songModalMode = null;
+    setStatus("Song updated.");
+    render();
+    return;
   }
 
-  if (songKeyInput) {
-    songKeyInput.addEventListener("change", () => {
-      addSongFormState.key = songKeyInput.value;
-    });
+  const response = await createSong(songPayload);
+  state.songs = response.songs;
+  selectSong(state, response.song.id);
+  state.selectedKey = response.song.key;
+  state.songModalMode = null;
+  setStatus("Song created.");
+  render();
+};
+
+const createSetlistFromForm = async (event: SubmitEvent): Promise<void> => {
+  event.preventDefault();
+
+  const form = event.currentTarget;
+
+  if (!(form instanceof HTMLFormElement)) {
+    return;
   }
 
-  if (songSectionsJsonInput) {
-    songSectionsJsonInput.addEventListener("input", () => {
-      addSongFormState.sectionsJson = songSectionsJsonInput.value;
-    });
+  const titleInput = form.elements.namedItem("title");
+  const dateInput = form.elements.namedItem("gigDate");
+  const notesInput = form.elements.namedItem("notes");
+
+  if (!(titleInput instanceof HTMLInputElement) || !(dateInput instanceof HTMLInputElement) || !(notesInput instanceof HTMLInputElement)) {
+    return;
   }
 
-  if (addSongForm) {
-    addSongForm.addEventListener("submit", async (event) => {
-      event.preventDefault();
+  const created = createNewSetlist(titleInput.value, dateInput.value, notesInput.value);
+  const response = await createSetlist(serializeSetlist(created));
+  state.setlists = response;
+  const createdSetlist = response.at(-1) ?? null;
 
-      addSongError = null;
+  if (createdSetlist) {
+    state.selectedSetlistId = createdSetlist.id;
+    state.selectedGroupId = createdSetlist.groups[0]?.id ?? null;
+  }
 
-      try {
-        const parsedSections = parseSectionsJson(addSongFormState.sectionsJson);
-        const updatedSongs = await createSong({
-          title: addSongFormState.title.trim(),
-          artist: addSongFormState.artist.trim(),
-          key: addSongFormState.key,
-          sections: parsedSections
-        });
+  state.setlistModalOpen = false;
+  state.setlistForm = createEmptySetlistForm();
+  syncSelection(state);
+  setStatus("Setlist created.");
+  render();
+};
 
-        songs = updatedSongs;
-        selectSong(songs.length - 1);
-        closeAddSongModal();
-      } catch (error) {
-        addSongError = error instanceof Error ? error.message : "Unable to add song.";
-      }
+const createGroupFromForm = async (event: SubmitEvent): Promise<void> => {
+  event.preventDefault();
 
-      render();
-    });
+  const form = event.currentTarget;
+
+  if (!(form instanceof HTMLFormElement)) {
+    return;
+  }
+
+  const groupNameInput = form.elements.namedItem("groupName");
+
+  if (!(groupNameInput instanceof HTMLInputElement)) {
+    return;
+  }
+
+  const activeSetlist = getSelectedSetlist(state);
+
+  if (!activeSetlist) {
+    setStatus("Create a setlist first.");
+    return;
+  }
+
+  const nextSetlist = addGroupToSetlist(activeSetlist, groupNameInput.value);
+  await persistActiveSetlist(nextSetlist);
+  state.groupModalOpen = false;
+  state.groupName = "";
+  setStatus("Group added.");
+  render();
+};
+
+const openSongModal = (mode: "create" | "edit", songId?: string): void => {
+  if (mode === "edit") {
+    const song = state.songs.find((entry) => entry.id === songId);
+
+    if (!song) {
+      return;
+    }
+
+    state.selectedSongId = song.id;
+    state.selectedKey = song.key;
+    state.songForm = createSongFormFromSong(song);
+  } else {
+    state.songForm = createEmptySongForm();
+  }
+
+  state.songModalMode = mode;
+  render();
+};
+
+const closeSongModal = (): void => {
+  state.songModalMode = null;
+  render();
+};
+
+const openSetlistModal = (): void => {
+  state.setlistForm = createEmptySetlistForm();
+  state.setlistModalOpen = true;
+  render();
+};
+
+const closeSetlistModal = (): void => {
+  state.setlistModalOpen = false;
+  render();
+};
+
+const openGroupModal = (): void => {
+  state.groupName = "";
+  state.groupModalOpen = true;
+  render();
+};
+
+const closeGroupModal = (): void => {
+  state.groupModalOpen = false;
+  render();
+};
+
+const addSongToActivePlaylist = async (songId: string): Promise<void> => {
+  const activeSetlist = getSelectedSetlist(state);
+
+  if (!activeSetlist) {
+    setStatus("Create a playlist first.");
+    return;
+  }
+
+  const nextSetlist = addSongToPlaylist(activeSetlist, songId);
+  await persistActiveSetlist(nextSetlist);
+  state.searchQuery = "";
+  state.currentSongIndex = Math.max(0, getPlaylistSongIds(nextSetlist).length - 1);
+  setStatus("Song added to playlist.");
+  render();
+};
+
+const moveSong = async (songId: string, direction: "up" | "down"): Promise<void> => {
+  const activeSetlist = getSelectedSetlist(state);
+
+  if (!activeSetlist) {
+    return;
+  }
+
+  const nextSetlist = moveSongInPlaylist(activeSetlist, songId, direction);
+  await persistActiveSetlist(nextSetlist);
+  render();
+};
+
+const removeSongFromActivePlaylist = async (songId: string): Promise<void> => {
+  const activeSetlist = getSelectedSetlist(state);
+
+  if (!activeSetlist) {
+    return;
+  }
+
+  const nextSetlist = removeSongFromPlaylist(activeSetlist, songId);
+  await persistActiveSetlist(nextSetlist);
+  const playlistSongIds = getPlaylistSongIds(nextSetlist);
+
+  if (playlistSongIds.length === 0) {
+    state.currentSongIndex = 0;
+    state.selectedSongId = null;
+  } else {
+    state.currentSongIndex = Math.max(0, Math.min(state.currentSongIndex, playlistSongIds.length - 1));
+    state.selectedSongId = playlistSongIds[state.currentSongIndex] ?? playlistSongIds[0] ?? null;
+  }
+
+  render();
+};
+
+const deleteSongFromLibrary = async (songId: string): Promise<void> => {
+  const activeSong = state.songs.find((song) => song.id === songId);
+
+  if (!activeSong) {
+    return;
+  }
+
+  if (!window.confirm(`Delete ${activeSong.title}?`)) {
+    return;
+  }
+
+  const response = await deleteSong(songId);
+  state.songs = response.songs;
+  state.setlists = removeSongFromAllSetlists(state.setlists, songId);
+
+  await Promise.all(state.setlists.map((setlist) => updateSetlist(setlist.id, serializeSetlist(setlist))));
+  await refreshSetlists();
+  syncSelection(state);
+  setStatus("Song deleted.");
+  render();
+};
+
+const onPlaybackKeyDown = (event: KeyboardEvent): void => {
+  const target = event.target as HTMLElement | null;
+
+  if (target && (target.matches("input, textarea, select") || target.isContentEditable)) {
+    return;
+  }
+
+  if (event.key === "ArrowRight") {
+    const songIds = getActivePlaylistSongIds();
+
+    if (songIds.length === 0 || state.currentSongIndex >= songIds.length - 1) {
+      return;
+    }
+
+    event.preventDefault();
+    goToNextPlaylistSong();
+  }
+
+  if (event.key === "ArrowLeft") {
+    const songIds = getActivePlaylistSongIds();
+
+    if (songIds.length === 0 || state.currentSongIndex <= 0) {
+      return;
+    }
+
+    event.preventDefault();
+    goToPreviousPlaylistSong();
   }
 };
 
+const onActionClick = async (target: HTMLElement): Promise<void> => {
+  const action = target.dataset.action;
+
+  switch (action) {
+    case "toggle-sidebar":
+      state.sidebarCollapsed = !state.sidebarCollapsed;
+      render();
+      break;
+    case "toggle-number-notation":
+      state.useNumberNotation = !state.useNumberNotation;
+      render();
+      break;
+    case "toggle-viewer-theme":
+      state.presentationTheme = state.presentationTheme === "dark" ? "light" : "dark";
+      render();
+      break;
+    case "toggle-presentation-mode":
+      state.presentationMode = !state.presentationMode;
+      render();
+      break;
+    case "select-song":
+      if (target.dataset.songId) {
+        selectSong(state, target.dataset.songId);
+        render();
+      }
+      break;
+    case "select-key":
+      if (target.dataset.key && NOTES.includes(target.dataset.key) && isValidNoteKey(target.dataset.key)) {
+        state.selectedKey = target.dataset.key;
+        render();
+      }
+      break;
+    case "open-song-modal":
+      openSongModal("create");
+      break;
+    case "edit-song":
+      if (target.dataset.songId) {
+        openSongModal("edit", target.dataset.songId);
+      }
+      break;
+    case "close-song-modal":
+      closeSongModal();
+      break;
+    case "open-setlist-modal":
+      openSetlistModal();
+      break;
+    case "close-setlist-modal":
+      closeSetlistModal();
+      break;
+    case "open-group-modal":
+      openGroupModal();
+      break;
+    case "close-group-modal":
+      closeGroupModal();
+      break;
+    case "select-setlist":
+      if (target.dataset.setlistId) {
+        selectSetlist(state, target.dataset.setlistId);
+        render();
+      }
+      break;
+    case "select-group":
+      if (target.dataset.groupId) {
+        selectGroup(state, target.dataset.groupId);
+        render();
+      }
+      break;
+    case "add-song-to-setlist":
+      if (target.dataset.songId) {
+        await addSongToActivePlaylist(target.dataset.songId);
+      }
+      break;
+    case "play-next-song":
+      goToNextPlaylistSong();
+      break;
+    case "play-previous-song":
+      goToPreviousPlaylistSong();
+      break;
+    case "move-song-up":
+      if (target.dataset.songId) {
+        await moveSong(target.dataset.songId, "up");
+      }
+      break;
+    case "move-song-down":
+      if (target.dataset.songId) {
+        await moveSong(target.dataset.songId, "down");
+      }
+      break;
+    case "remove-song-from-playlist":
+      if (target.dataset.songId) {
+        await removeSongFromActivePlaylist(target.dataset.songId);
+      }
+      break;
+    case "delete-song":
+      if (target.dataset.songId) {
+        await deleteSongFromLibrary(target.dataset.songId);
+      }
+      break;
+    default:
+      break;
+  }
+};
+
+const onFieldInput = (target: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement): void => {
+  if (target.matches('[data-action="search-songs"]')) {
+    state.searchQuery = target.value;
+    refreshSongLibraryResults();
+    return;
+  }
+
+  if (target.closest('[data-action="submit-song-form"]')) {
+    if (target.name === "title") {
+      state.songForm.title = target.value;
+    } else if (target.name === "artist") {
+      state.songForm.artist = target.value;
+    } else if (target.name === "key") {
+      state.songForm.key = target.value;
+    } else if (target.name === "sectionsJson") {
+      state.songForm.sectionsJson = target.value;
+    }
+    return;
+  }
+
+  if (target.closest('[data-action="submit-setlist-form"]')) {
+    if (target.name === "title") {
+      state.setlistForm.title = target.value;
+    } else if (target.name === "gigDate") {
+      state.setlistForm.gigDate = target.value;
+    } else if (target.name === "notes") {
+      state.setlistForm.notes = target.value;
+    }
+    return;
+  }
+
+  if (target.closest('[data-action="submit-group-form"]') && target.name === "groupName") {
+    state.groupName = target.value;
+  }
+};
+
+app.addEventListener("click", async (event) => {
+  const target = event.target as HTMLElement | null;
+  const actionable = target?.closest<HTMLElement>("[data-action]");
+
+  if (!actionable) {
+    return;
+  }
+
+  await onActionClick(actionable);
+});
+
+app.addEventListener("input", (event) => {
+  const target = event.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null;
+
+  if (!target) {
+    return;
+  }
+
+  onFieldInput(target);
+});
+
+app.addEventListener("change", (event) => {
+  const target = event.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null;
+
+  if (!target) {
+    return;
+  }
+
+  onFieldInput(target);
+});
+
+window.addEventListener("keydown", onPlaybackKeyDown);
+
+app.addEventListener("submit", async (event) => {
+  const target = event.target as HTMLFormElement | null;
+
+  if (!target) {
+    return;
+  }
+
+  const action = target.dataset.action;
+
+  if (action === "submit-song-form") {
+    try {
+      await createOrUpdateSong(event);
+      closeSongModal();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Unable to save song.");
+    }
+  }
+
+  if (action === "submit-setlist-form") {
+    try {
+      await createSetlistFromForm(event);
+      closeSetlistModal();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Unable to create setlist.");
+    }
+  }
+
+  if (action === "submit-group-form") {
+    try {
+      await createGroupFromForm(event);
+      closeGroupModal();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Unable to create group.");
+    }
+  }
+});
+
 const bootstrap = async (): Promise<void> => {
   try {
-    songs = await fetchSongs();
+    await Promise.all([refreshSongs(), refreshSetlists()]);
+    syncSelection(state);
 
-    if (songs.length === 0) {
-      throw new Error("Song list is empty.");
+    if (state.songs.length > 0) {
+      state.selectedSongId = state.selectedSongId ?? state.songs[0].id;
+      state.selectedKey = state.songs[0].key;
     }
 
-    const initialSong = songs[currentSongIndex];
-    selectedKey = isValidNoteKey(initialSong.key) ? normalizeNote(initialSong.key) : "C";
+    if (state.setlists.length > 0) {
+      state.selectedSetlistId = state.selectedSetlistId ?? state.setlists[0].id;
+      state.selectedGroupId = state.selectedGroupId ?? state.setlists[0].groups[0]?.id ?? null;
+    }
+
+    const activePlaylistSongIds = getActivePlaylistSongIds();
+    if (activePlaylistSongIds.length > 0) {
+      state.currentSongIndex = Math.max(0, Math.min(state.currentSongIndex, activePlaylistSongIds.length - 1));
+      state.selectedSongId = activePlaylistSongIds[state.currentSongIndex] ?? state.selectedSongId;
+    }
+
     render();
   } catch (error) {
-    app.innerHTML = `
-      <div class="mx-auto mt-20 w-full max-w-3xl rounded-xl border border-neutral-800 bg-neutral-900 p-8 text-center text-neutral-300">
-        Unable to load songs from API. Make sure the backend is running on port 4000.
-      </div>
-    `;
-    console.error(error);
+    app.innerHTML = `<div class="flex h-screen items-center justify-center p-6 text-white">${error instanceof Error ? error.message : "Failed to start StageChord."}</div>`;
   }
 };
 

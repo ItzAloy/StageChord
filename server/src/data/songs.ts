@@ -1,6 +1,6 @@
 import { Song } from "../types";
 
-export const songs: Song[] = [
+export const seedSongs: Song[] = [
 {
     id: "song-1",
     title: "Sukacitaku",
