@@ -54,5 +54,3 @@ Karena perubahan lagu di web tersimpan di penyimpanan browser (*LocalStorage*), 
 3. Klik tombol **Export songData.ts**.
 4. Ambil file unduhan tersebut, lalu timpa (*overwrite*) file `src/songData.ts` lama di folder proyek VS Code kamu.
 5. Lakukan `git commit` dan `git push` ke repository GitHub kamu!
-
-```
