@@ -4,10 +4,8 @@
   font-family: 'Manrope', sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  color: #e8f6ec;
-  background:
-    radial-gradient(circle at top, rgba(98, 172, 121, 0.18), transparent 32%),
-    linear-gradient(180deg, #09110d 0%, #0b1813 50%, #050807 100%);
+  color: #f5f5f5;
+  background: #000000;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -18,14 +16,18 @@
   box-sizing: border-box;
 }
 
-html {
-  min-height: 100%;
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
 }
 
 body {
-  margin: 0;
   min-width: 320px;
-  min-height: 100vh;
+  background: #000000;
 }
 
 button,
@@ -39,11 +41,7 @@ button {
   -webkit-tap-highlight-color: transparent;
 }
 
-#root {
-  min-height: 100vh;
-}
-
 ::selection {
-  background: rgba(181, 255, 199, 0.24);
-  color: #f6fff8;
+  background: rgba(255, 59, 48, 0.25);
+  color: #ffffff;
 }
