@@ -51,7 +51,7 @@
 }
 
 .dashboard-header {
-  padding: 18px 20px 14px;
+  padding: 0 !important; /* Kita serahkan padding sepenuhnya ke .header-bar */
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   background: linear-gradient(180deg, rgba(24, 24, 24, 0.96), rgba(10, 10, 10, 0.9));
 }
@@ -158,11 +158,28 @@
   color: rgba(255, 59, 48, 0.85);
 }
 
-.header-menu-button {
-  margin-top: 2px;
-  flex: 0 0 auto;
+.header-menu-button,
+.header-edit-button {
+  background: #111111 !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  color: #ffffff !important;
+  border-radius: 4px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  transition: all 150ms ease !important;
 }
 
+.header-menu-button:hover,
+.header-edit-button:hover {
+  background: #ff3b30 !important; /* Berubah merah khas StageChord saat dihover */
+  border-color: #ff3b30 !important;
+  transform: scale(1.05);
+}
+
+.header-title {
+  gap: 12px !important; /* Mengurangi gap berlebih antara panel tombol dan nama lagu */
+}
 .header-key {
   justify-self: center;
   display: grid;
@@ -704,10 +721,18 @@
 }
 
 .section-card {
-  padding: 14px;
-  min-height: 160px;
-  display: grid;
-  gap: 12px;
+  padding: 18px;
+  background: #1a1a1a;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  
+  /* PERUBAHAN UTAMA DI SINI */
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: flex-start !important; /* Memaksa konten rata atas (top-align) */
+  align-items: stretch !important;
+  height: fit-content !important; /* Membuat tinggi box mengikuti panjang teks saja */
+  min-height: auto !important; /* Hapus min-height bawaan agar box tidak dipaksa besar */
 }
 
 .section-badge {
@@ -835,14 +860,16 @@
 }
 
 @media (max-width: 900px) {
-  .header-bar {
-    grid-template-columns: 1fr;
-    justify-items: stretch;
+.header-bar {
+    grid-template-columns: none !important;
+    display: flex !important;
+    flex-direction: row !important;
+    justify-content: space-between !important;
   }
 
   .header-key,
   .header-meta {
-    justify-self: stretch;
+    justify-self: auto !important;
   }
 
   .header-key {
@@ -869,8 +896,7 @@
   }
 
   .transpose-controls,
-  .quick-keys,
-  .view-toggles {
-    justify-content: flex-start;
+  .quick-keys {
+    display: none !important; /* Sembunyikan quick keys di layar kecil agar tidak memakan ruang */
   }
 }

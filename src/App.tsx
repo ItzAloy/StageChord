@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent, type ChangeEvent } from 'react'
 import DashboardLayout from './DashboardLayout'
 import './App.css'
 import { songs as defaultSongs, type Song, type SongSection, type SongSectionType } from './songData'
@@ -24,8 +24,6 @@ function getSectionTypeLabel(type: SongSectionType) {
 }
 
 const songTypeOptions = [
-  'Worship',
-  'Praise',
   'Upbeat (Praise)',
   'Slowbeat (Worship)',
   'Offering',
@@ -69,7 +67,6 @@ type ComposerSectionDraft = {
   type: SongSectionType
   label: string
   content: string
-  notation: string
   sameAs: string
   repeat: string
 }
@@ -83,9 +80,6 @@ type SongDraft = {
   language: string
   key: string
   songType: string
-  sessionPhase: string
-  tempo: string
-  meter: string
   youtubeUrl: string
   spotifyUrl: string
   sections: ComposerSectionDraft[]
@@ -96,7 +90,6 @@ const createDraftSection = (type: SongSectionType = 'verse', label = 'VERSE'): C
   type,
   label,
   content: 'C   G   Am   F\nLyrics here',
-  notation: '',
   sameAs: '',
   repeat: '',
 })
@@ -110,9 +103,6 @@ const defaultDraft: SongDraft = {
   language: 'id',
   key: 'C',
   songType: 'Worship',
-  sessionPhase: 'SESI 1: PEMBUKAAN',
-  tempo: '72 BPM',
-  meter: '4/4',
   youtubeUrl: '',
   spotifyUrl: '',
   sections: [createDraftSection()],
@@ -123,7 +113,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function prefersFlats(note: string) {
-  return note.includes('b')
+  return note.includes('b') || note === 'F'
 }
 
 function parseChordRoot(chordPart: string) {
@@ -202,14 +192,6 @@ function chordToNashville(chord: string, key: string) {
   return result
 }
 
-function formatChordLine(chords: string[]) {
-  return chords.join('   ')
-}
-
-function formatNumberLine(chords: string[], key: string) {
-  return chords.map((chord) => chordToNashville(chord, key)).join('   ')
-}
-
 function normalizeChordTokens(chords: string[]) {
   return chords
     .flatMap((chord) => (chord.includes(',') ? chord.split(/[,|\s]+/) : [chord]))
@@ -218,27 +200,20 @@ function normalizeChordTokens(chords: string[]) {
 }
 
 function splitSectionContent(content: string) {
-  const lines = content
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
+  const lines = content.split(/\r?\n/);
+  const chords: string[] = [];
 
-  if (lines.length === 0) {
-    return { chords: ['C'], lyrics: '' }
-  }
-
-  const chords = lines[0]
-    .replace(/[|]/g, ' ')
-    .split(/\s+|,+/)
-    .map((value) => value.trim())
-    .filter(Boolean)
-
-  const lyrics = lines.slice(1).join('\n').trim()
+  lines.forEach(line => {
+    const matched = line.match(/([A-G][#b]?[^\s]*)/g);
+    if (matched) {
+      matched.forEach(c => chords.push(c.trim()));
+    }
+  });
 
   return {
     chords: chords.length > 0 ? chords : ['C'],
-    lyrics,
-  }
+    lyrics: content
+  };
 }
 
 function transposeNote(note: string, shift: number, preferFlats: boolean) {
@@ -270,6 +245,31 @@ function transposeChord(chord: string, shift: number, preferFlats: boolean) {
       return `${transposeNote(`${letter}${accidental}`, shift, preferFlats)}${suffix}`
     })
     .join('/')
+}
+
+function transposeChordLineWithSpaces(line: string, shift: number, preferFlats: boolean, toNashvilleKey?: string) {
+  const regex = /([A-G][#b]?[^\s]*)/g;
+  let match;
+  let result = "";
+  let lastIndex = 0;
+
+  while ((match = regex.exec(line)) !== null) {
+    const chord = match[1];
+    const index = match.index;
+
+    result += line.substring(lastIndex, index);
+
+    let newChord = transposeChord(chord, shift, preferFlats);
+    if (toNashvilleKey) {
+      newChord = chordToNashville(newChord, toNashvilleKey);
+    }
+
+    result += newChord;
+    lastIndex = regex.lastIndex;
+  }
+
+  result += line.substring(lastIndex);
+  return result;
 }
 
 function getSemitoneDistance(from: string, to: string) {
@@ -311,9 +311,7 @@ function normalizeSongSection(value: unknown): SongSection | null {
     id: typeof value.id === 'string' && value.id.trim() ? value.id.trim() : `${label}-${Date.now()}`,
     type: sectionType,
     label,
-    chords,
     lyrics,
-    notation: notation || undefined,
     sameAs: typeof value.sameAs === 'string' && value.sameAs.trim() ? value.sameAs.trim() : undefined,
     repeat,
   }
@@ -345,18 +343,12 @@ function normalizeSong(value: unknown): Song | null {
     language: typeof value.language === 'string' && value.language.trim() ? value.language.trim() : 'id',
     key,
     songType: typeof value.songType === 'string' && value.songType.trim() ? value.songType.trim() : 'Worship',
-    sessionPhase:
-      typeof value.sessionPhase === 'string' && value.sessionPhase.trim()
-        ? value.sessionPhase.trim()
-        : 'SESI 1: PEMBUKAAN',
-    tempo: typeof value.tempo === 'string' ? value.tempo.trim() : undefined,
-    meter: typeof value.meter === 'string' ? value.meter.trim() : undefined,
     sections,
     media: isRecord(value.media)
       ? {
-          youtubeUrl: typeof value.media.youtubeUrl === 'string' ? value.media.youtubeUrl.trim() : undefined,
-          spotifyUrl: typeof value.media.spotifyUrl === 'string' ? value.media.spotifyUrl.trim() : undefined,
-        }
+        youtubeUrl: typeof value.media.youtubeUrl === 'string' ? value.media.youtubeUrl.trim() : undefined,
+        spotifyUrl: typeof value.media.spotifyUrl === 'string' ? value.media.spotifyUrl.trim() : undefined,
+      }
       : undefined,
   }
 }
@@ -400,19 +392,14 @@ function createSongFromDraft(draft: SongDraft): Song {
     language: draft.language.trim() || 'id',
     key: draft.key.trim() || 'C',
     songType: draft.songType.trim() || 'Worship',
-    sessionPhase: draft.sessionPhase.trim() || 'SESI 1: PEMBUKAAN',
-    tempo: draft.tempo.trim() || '72 BPM',
-    meter: draft.meter.trim() || '4/4',
     sections: draft.sections.map((section) => {
       const parsedContent = splitSectionContent(section.content)
-
       return {
         id: section.id,
         type: section.type,
         label: section.label.trim() || section.type.toUpperCase(),
         chords: normalizeChordTokens(parsedContent.chords),
         lyrics: parsedContent.lyrics,
-        notation: section.notation.trim() || undefined,
         sameAs: section.sameAs.trim() || undefined,
         repeat: section.repeat.trim() || undefined,
       }
@@ -434,22 +421,18 @@ function buildDraftFromSong(song: Song): SongDraft {
     language: song.language,
     key: song.key,
     songType: song.songType,
-    sessionPhase: song.sessionPhase,
-    tempo: song.tempo ?? '72 BPM',
-    meter: song.meter ?? '4/4',
     youtubeUrl: song.media?.youtubeUrl ?? '',
     spotifyUrl: song.media?.spotifyUrl ?? '',
     sections:
       song.sections.length > 0
         ? song.sections.map((section) => ({
-            id: section.id,
-            type: section.type,
-            label: section.label,
-            content: [section.chords.join('   '), section.lyrics].filter(Boolean).join('\n'),
-            notation: section.notation ?? '',
-            sameAs: section.sameAs ?? '',
-            repeat: section.repeat ?? '',
-          }))
+          id: section.id,
+          type: section.type,
+          label: section.label,
+          content: [section.lyrics].filter(Boolean).join('\n'),
+          sameAs: section.sameAs ?? '',
+          repeat: section.repeat ?? '',
+        }))
         : [createDraftSection()],
   }
 }
@@ -459,7 +442,8 @@ function App() {
   const [selectedSongIndex, setSelectedSongIndex] = useState(0)
   const [selectedKey, setSelectedKey] = useState(() => loadSongLibrary()[0]?.key ?? 'C')
   const [showLyrics, setShowLyrics] = useState(true)
-  const [showNotation, setShowNotation] = useState(true)
+  const [showNotation, setShowNotation] = useState(false) // Set default ke Chord abjad dulu biar pas render awal pas
+  const [fontSizeMultiplier, setFontSizeMultiplier] = useState(0.6) // 1.0 adalah ukuran normal (100%)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [composerOpen, setComposerOpen] = useState(false)
   const [composerMode, setComposerMode] = useState<'add' | 'edit'>('add')
@@ -490,18 +474,34 @@ function App() {
   const renderedSections = useMemo(
     () =>
       displaySong.sections.map((section) => {
-        const transposedChords = section.chords.map((chord) =>
-          transposeChord(chord, transposeAmount, prefersFlats(selectedKey)),
-        )
+        const lines = section.lyrics.split(/\r?\n/);
+
+        const processedLines = lines.map((line) => {
+          const isChordLine = line.trim() !== "" && !/[a-z]{3,}/i.test(line.replace(/([A-G][#b]?[^\s]*)/g, ""));
+
+          if (isChordLine) {
+            const preferFlats = prefersFlats(selectedKey);
+            const chordLine = transposeChordLineWithSpaces(line, transposeAmount, preferFlats);
+            const numberLine = transposeChordLineWithSpaces(line, transposeAmount, preferFlats, selectedKey);
+
+            return {
+              isChord: true,
+              text: showNotation ? numberLine : chordLine
+            };
+          }
+
+          return {
+            isChord: false,
+            text: line
+          };
+        });
 
         return {
           ...section,
-          chords: transposedChords,
-          chordLine: formatChordLine(transposedChords),
-          numberLine: formatNumberLine(transposedChords, selectedKey),
-        }
+          processedLines
+        };
       }),
-    [displaySong.sections, selectedKey, transposeAmount],
+    [displaySong.sections, selectedKey, transposeAmount, showNotation],
   )
 
   const visibleSongs = useMemo(() => {
@@ -521,8 +521,7 @@ function App() {
         song.language,
         song.key,
         song.songType,
-        song.sessionPhase,
-        ...song.sections.flatMap((section) => [section.label, section.lyrics, section.chords.join(' '), section.notation ?? '', section.repeat ?? '']),
+        ...song.sections.flatMap((section) => [section.label, section.lyrics, section.repeat ?? '']),
       ]
         .join(' ')
         .toLowerCase()
@@ -634,10 +633,10 @@ function App() {
       sections: current.sections.map((section, sectionIndex) =>
         sectionIndex === index
           ? {
-              ...section,
-              [field]: value,
-              ...(field === 'type' && typeof value === 'string' ? { label: getSectionTypeLabel(value as SongSectionType) } : {}),
-            }
+            ...section,
+            [field]: value,
+            ...(field === 'type' && typeof value === 'string' ? { label: getSectionTypeLabel(value as SongSectionType) } : {}),
+          }
           : section,
       ),
     }))
@@ -670,10 +669,9 @@ function App() {
         sections: current.sections.map((candidate, candidateIndex) =>
           candidateIndex === index
             ? {
-                ...candidate,
-                content: source.content,
-                notation: source.notation,
-              }
+              ...candidate,
+              content: source.content,
+            }
             : candidate,
         ),
       }
@@ -719,49 +717,30 @@ function App() {
     setComposerTargetSongId(null)
   }
 
+  // === DIDEKLARASIKAN & DIHUBUNGKAN KE SIDEBAR UTK MENGHINDARI WARN TS ===
   async function handleImportLibrary(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
-
-    if (!file) {
-      return
-    }
-
+    if (!file) return
     try {
       const text = await file.text()
-      const parsed = JSON.parse(text) as unknown
-
-      if (!Array.isArray(parsed)) {
-        throw new Error('Invalid file format')
-      }
-
-      const importedLibrary = parsed.map((song) => normalizeSong(song)).filter((song): song is Song => song !== null)
-
-      if (importedLibrary.length === 0) {
-        throw new Error('No valid songs found')
-      }
-
-      setLibrary(importedLibrary)
+      const parsed = JSON.parse(text)
+      if (!Array.isArray(parsed)) throw new Error()
+      const imported = parsed.map(normalizeSong).filter((s): s is Song => s !== null)
+      if (imported.length === 0) throw new Error()
+      setLibrary(imported)
       setSelectedSongIndex(0)
-      setSelectedKey(importedLibrary[0]?.key ?? 'C')
-      setSearchQuery('')
-      setComposerOpen(false)
-      setDraft(buildDraftFromSong(importedLibrary[0]))
-    } catch {
-      window.alert('File JSON tidak valid.')
-    } finally {
-      event.target.value = ''
-    }
+      setSelectedKey(imported[0].key)
+      closeComposer()
+    } catch { window.alert('File JSON tidak valid.') }
   }
 
   function handleExportLibrary() {
     const blob = new Blob([JSON.stringify(library, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
-
     link.href = url
     link.download = 'stagechord-library.json'
     link.click()
-
     URL.revokeObjectURL(url)
   }
 
@@ -779,21 +758,13 @@ function App() {
           `    language: ${JSON.stringify(song.language)},`,
           `    key: ${JSON.stringify(song.key)},`,
           `    songType: ${JSON.stringify(song.songType)},`,
-          `    sessionPhase: ${JSON.stringify(song.sessionPhase)},`,
-          song.tempo ? `    tempo: ${JSON.stringify(song.tempo)},` : null,
-          song.meter ? `    meter: ${JSON.stringify(song.meter)},` : null,
-          song.media && (song.media.youtubeUrl || song.media.spotifyUrl)
-            ? `    media: ${JSON.stringify(song.media, null, 2).replace(/\n/g, '\n    ')},`
-            : null,
           '    sections: [',
           ...song.sections.flatMap((section) => [
             '      {',
             `        id: ${JSON.stringify(section.id)},`,
             `        type: ${JSON.stringify(section.type)},`,
             `        label: ${JSON.stringify(section.label)},`,
-            `        chords: ${JSON.stringify(section.chords)},`,
             `        lyrics: ${JSON.stringify(section.lyrics)},`,
-            section.notation ? `        notation: ${JSON.stringify(section.notation)},` : null,
             section.sameAs ? `        sameAs: ${JSON.stringify(section.sameAs)},` : null,
             section.repeat ? `        repeat: ${JSON.stringify(section.repeat)},` : null,
             '      },',
@@ -806,30 +777,22 @@ function App() {
       })
       .join('\n')
 
-    const fileContent = `export const songs: Song[] = [\n${serializedSongs}\n]\n`
+    const fileContent = `import { type Song } from './songData'\n\nexport const songs: Song[] = [\n${serializedSongs}\n]\n`
     const blob = new Blob([fileContent], { type: 'text/typescript' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
-
     link.href = url
     link.download = 'songData.ts'
     link.click()
-
     URL.revokeObjectURL(url)
   }
 
   function handleResetLibrary() {
-    if (!window.confirm('Reset library ke data default dari songData.ts? Perubahan tersimpan di browser akan hilang.')) {
-      return
-    }
-
+    if (!window.confirm('Reset library ke data default?')) return
     window.localStorage.removeItem(storageKey)
     setLibrary(defaultSongs)
     setSelectedSongIndex(0)
     setSelectedKey(defaultSongs[0]?.key ?? 'C')
-    setSearchQuery('')
-    setComposerOpen(false)
-    setDraft(buildDraftFromSong(defaultSongs[0]))
   }
 
   const sidebar = (
@@ -932,37 +895,125 @@ function App() {
           )}
         </div>
       </section>
+
+      {/* PANEL MANAGEMENT DATA */}
+      <section className="sidebar-panel sidebar-management-panel" style={{ marginTop: 'auto', padding: '15px', borderTop: '1px solid #333' }}>
+        <div style={{ display: 'grid', gap: '8px' }}>
+          <button 
+            type="button" 
+            onClick={handleExportSongDataTs} 
+            style={{ 
+              padding: '8px', 
+              background: '#0284c7', 
+              color: '#ffffff', 
+              border: 'none', 
+              borderRadius: '4px',
+              fontWeight: 'bold',
+              cursor: 'pointer' 
+            }}
+          >
+            Export songData.ts
+          </button>
+          <button 
+            type="button" 
+            onClick={handleExportLibrary} 
+            style={{ 
+              padding: '6px', 
+              background: '#222', 
+              color: '#ccc', 
+              border: '1px solid #444', 
+              borderRadius: '4px',
+              cursor: 'pointer' 
+            }}
+          >
+            Backup (.json)
+          </button>
+          <label 
+            style={{ 
+              display: 'block', 
+              textAlign: 'center', 
+              background: '#222', 
+              padding: '6px', 
+              color: '#ccc', 
+              border: '1px solid #444', 
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '13px'
+            }}
+          >
+            Import Backup
+            <input type="file" accept=".json" onChange={handleImportLibrary} style={{ display: 'none' }} />
+          </label>
+          <button 
+            type="button" 
+            onClick={handleResetLibrary} 
+            style={{ 
+              padding: '6px', 
+              background: '#3b1111', 
+              color: '#ff8888', 
+              border: 'none', 
+              borderRadius: '4px',
+              cursor: 'pointer',
+              marginTop: '5px'
+            }}
+          >
+            Reset Default
+          </button>
+        </div>
+      </section>
     </div>
   )
   
-  const header = (
-    <div className="header-bar">
-      <div className="header-title">
-        <button type="button" className="icon-button header-menu-button" onClick={() => setSidebarOpen((current) => !current)} aria-label="Toggle sidebar">
-          ☰
-        </button>
-        <button type="button" className="icon-button header-edit-button" onClick={openEditComposer} aria-label="Edit current song">
-          ✎
-        </button>
-        <div>
-          <p className="eyebrow">Now Showing</p>
-          <h1>
+const header = (
+    <div className="header-bar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 16px', minHeight: '50px', borderBottom: '1px solid #222', gap: '12px' }}>
+      
+      {/* Kolom Kiri: Menu & Edit yang ditumpuk vertikal, lalu Informasi Lagu */}
+      <div className="header-title" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        {/* Kontainer Tombol Menu dan Edit (Ditumpuk Vertikal) */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <button 
+            type="button" 
+            className="icon-button header-menu-button" 
+            onClick={() => setSidebarOpen((current) => !current)} 
+            aria-label="Toggle sidebar"
+            style={{ width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, fontSize: '14px', cursor: 'pointer' }}
+          >
+            ☰
+          </button>
+          <button 
+            type="button" 
+            className="icon-button header-edit-button" 
+            onClick={openEditComposer} 
+            aria-label="Edit current song"
+            style={{ width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0, fontSize: '12px', cursor: 'pointer' }}
+          >
+            ✎
+          </button>
+        </div>
+
+        {/* Info Lagu (Diperkecil gap-nya) */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+          <p className="eyebrow" style={{ margin: 0, fontSize: '10px', textTransform: 'uppercase', color: '#888', letterSpacing: '0.5px', lineHeight: '1' }}>Now Showing</p>
+          <h1 style={{ margin: 0, fontSize: '1.4rem', fontWeight: 'bold', lineHeight: '1.2', display: 'flex', alignItems: 'center', gap: '6px' }}>
             {displaySong.title}
-            {displaySong.subtitle ? <span> - {displaySong.subtitle}</span> : null}
+            {displaySong.subtitle ? <span style={{ fontSize: '1rem', color: '#666', fontWeight: 'normal' }}> - {displaySong.subtitle}</span> : null}
           </h1>
-          <p className="header-subtitle">
+          <p className="header-subtitle" style={{ margin: 0, fontSize: '0.9rem', color: '#aaa', lineHeight: '1' }}>
             {displaySong.artist}
           </p>
         </div>
       </div>
 
-      <div className="header-key">
-        <span>Key</span>
-        <strong>{selectedKey}</strong>
+      {/* Kolom Tengah: Tampilan Key Saat Ini (Dibuat super compact) */}
+      <div className="header-key" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1px', padding: '2px 10px', background: '#111', borderRadius: '4px', border: '1px solid #222', minWidth: '45px' }}>
+        <span style={{ fontSize: '9px', color: '#888', textTransform: 'uppercase', lineHeight: '1' }}>Key</span>
+        <strong style={{ fontSize: '1.1rem', color: '#38bdf8', lineHeight: '1' }}>{selectedKey}</strong>
       </div>
 
-      <div className="header-meta">
-        <div className="quick-keys" aria-label="Quick key selector">
+      {/* Kolom Kanan: Selector Key Cepat & Toggles */}
+      <div className="header-meta" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        {/* Quick Keys (Dirampingkan paddingnya) */}
+        <div className="quick-keys" aria-label="Quick key selector" style={{ display: 'flex', gap: '3px' }}>
           {keyOptions.map((key) => (
             <button
               key={key}
@@ -970,21 +1021,56 @@ function App() {
               className={key === selectedKey ? 'quick-key quick-key--active' : 'quick-key'}
               onClick={() => setSelectedKey(key)}
               aria-pressed={key === selectedKey}
+              style={{ padding: '3px 6px', fontSize: '11px', borderRadius: '3px', cursor: 'pointer' }}
             >
               {key}
             </button>
           ))}
         </div>
 
-        <div className="view-toggles">
-          <button type="button" className={showLyrics ? 'toggle-pill toggle-pill--active' : 'toggle-pill'} onClick={() => setShowLyrics((current) => !current)}>
+        {/* View & Size Toggles */}
+        <div className="view-toggles" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {/* Font Size Adjuster (Lebih compact) */}
+          <div className="font-size-adjuster" style={{ display: 'flex', alignItems: 'center', gap: '2px', background: '#1a1a1a', padding: '1px 6px', borderRadius: '15px', border: '1px solid #333' }}>
+            <span style={{ fontSize: '9px', color: '#666', marginRight: '2px', textTransform: 'uppercase', fontWeight: 'bold' }}>Size</span>
+            <button 
+              type="button" 
+              onClick={() => setFontSizeMultiplier(prev => Math.max(0.6, prev - 0.1))} 
+              style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold', padding: '0 4px' }}
+            >
+              -
+            </button>
+            <span style={{ color: '#38bdf8', fontWeight: 'bold', minWidth: '30px', textAlign: 'center', fontSize: '11px' }}>
+              {Math.round(fontSizeMultiplier * 100)}%
+            </span>
+            <button 
+              type="button" 
+              onClick={() => setFontSizeMultiplier(prev => Math.min(2.0, prev + 0.1))} 
+              style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '14px', fontWeight: 'bold', padding: '0 4px' }}
+            >
+              +
+            </button>
+          </div>
+
+          <button 
+            type="button" 
+            className={showLyrics ? 'toggle-pill toggle-pill--active' : 'toggle-pill'} 
+            onClick={() => setShowLyrics((current) => !current)}
+            style={{ padding: '4px 10px', fontSize: '11px', borderRadius: '15px' }}
+          >
             Show Lyrics
           </button>
-          <button type="button" className={showNotation ? 'toggle-pill toggle-pill--active' : 'toggle-pill'} onClick={() => setShowNotation((current) => !current)}>
+          <button 
+            type="button" 
+            className={showNotation ? 'toggle-pill toggle-pill--active' : 'toggle-pill'} 
+            onClick={() => setShowNotation((current) => !current)}
+            style={{ padding: '4px 10px', fontSize: '11px', borderRadius: '15px' }}
+          >
             Number Notation
           </button>
         </div>
       </div>
+
     </div>
   )
 
@@ -1122,15 +1208,6 @@ function App() {
                     />
                   </label>
 
-                  <label>
-                    Rhythm notation (opsional)
-                    <input
-                      value={section.notation}
-                      onChange={(event) => updateComposerSection(index, 'notation', event.target.value)}
-                      placeholder='e.g. | 1 • 2 | • • 3 4 |'
-                    />
-                  </label>
-
                   <label className="composer-more-option">
                     Make this part the same as
                     <div className="composer-inline-field">
@@ -1173,23 +1250,75 @@ function App() {
     </div>
   ) : null
 
-  return (
+return (
     <DashboardLayout sidebar={sidebar} header={header} footer={footer} drawer={drawer} sidebarOpen={sidebarOpen}>
-      <section className="song-canvas">
+      <section className="song-canvas" style={{ padding: '20px' }}>
         {renderedSections.map((section) => (
-          <article key={section.id} className="section-card">
-            <div className="section-badge">{section.label}</div>
-
-            <div className="section-body">
-              <div className="chord-line" aria-label={`${section.label} chords`}>
-                {showNotation ? section.numberLine : section.chordLine}
+          <article key={section.id} className="section-card" style={{ marginBottom: '24px' }}>
+            
+            {/* Header Section: Tempat menyatukan Badge Label dan Repeat agar sejajar */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+              <div className="section-badge" style={{ margin: 0 }}>
+                {section.label}
               </div>
+              {section.repeat ? (
+                <span 
+                  className="repeat-badge" 
+                  style={{ 
+                    background: '#1e293b', 
+                    color: '#f43f5e', // Warna merah muda/pink estetik untuk repeat marker
+                    padding: '4px 8px', 
+                    borderRadius: '4px', 
+                    fontSize: '12px', 
+                    fontWeight: 'bold',
+                    border: '1px solid #312e81'
+                  }}
+                >
+                  {section.repeat}
+                </span>
+              ) : null}
+            </div>
 
-              {section.notation ? <div className="notation-line">{section.notation}</div> : null}
+            <div 
+              className="section-body" 
+              style={{ 
+                fontFamily: 'monospace', 
+                whiteSpace: 'pre', 
+                lineHeight: '1.8' 
+              }}
+            >
+              {section.processedLines.map((line, idx) => {
+                if (line.isChord) {
+                  return (
+                    <div 
+                      key={idx} 
+                      className="chord-line" 
+                      style={{ 
+                        color: '#38bdf8', 
+                        fontWeight: 'bold',
+                        fontSize: `${1.25 * fontSizeMultiplier}rem`, // Mengikuti multiplier
+                        marginBottom: '4px'
+                      }}
+                    >
+                      {line.text}
+                    </div>
+                  );
+                }
 
-              {showLyrics && section.lyrics ? <p className="lyric-line">{section.lyrics}</p> : null}
-
-              {section.repeat ? <div className="repeat-line">{section.repeat}</div> : null}
+                return showLyrics ? (
+                  <div 
+                    key={idx} 
+                    className="lyric-line" 
+                    style={{ 
+                      color: '#ffffff',
+                      fontSize: `${1.4 * fontSizeMultiplier}rem`, // Mengikuti multiplier
+                      marginBottom: '10px'
+                    }}
+                  >
+                    {line.text}
+                  </div>
+                ) : null;
+              })}
             </div>
           </article>
         ))}

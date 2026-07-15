@@ -1,41 +1,4 @@
-export type SongSectionType =
-  | 'intro'
-  | 'verse'
-  | 'pre-chorus'
-  | 'chorus'
-  | 'bridge'
-  | 'interlude'
-  | 'outro'
-  | 'tag'
-  | 'instrumental'
-
-export type SongSection = {
-  id: string
-  type: SongSectionType
-  label: string
-  lyrics: string
-  sameAs?: string
-  repeat?: string
-}
-
-export type SongMedia = {
-  youtubeUrl?: string
-  spotifyUrl?: string
-}
-
-export type Song = {
-  id: string
-  title: string
-  subtitle?: string
-  artist: string
-  album?: string
-  songwriter?: string
-  language: string
-  key: string
-  songType: string
-  sections: SongSection[]
-  media?: SongMedia
-}
+import { type Song } from './songData'
 
 export const songs: Song[] = [
   {
@@ -132,7 +95,7 @@ export const songs: Song[] = [
     ],
   },
   {
-    id: "kuberikan-hatiku",
+    id: "great-are-you-lord",
     title: "Kuberikan Hatiku",
     subtitle: "Live",
     artist: "Franky Sihombing",
@@ -143,20 +106,20 @@ export const songs: Song[] = [
     songType: "Slowbeat (Worship)",
     sections: [
       {
-        id: "kuberikan-hatiku-verse",
+        id: "great-are-you-lord-verse",
         type: "verse",
         label: "VERSE",
         lyrics: "G          Em    C  G  D\nInilah rinduku kepa-da-Mu\nEm           G          F   C   D\nSegenap hatiku menyembahMu\nG           Em    C  G  D\nSeluruh hidupku memu-ji-Mu\nEm       G          F   C   D\nKu memujaMu ya Allahku",
       },
       {
-        id: "kuberikan-hatiku-bridge",
+        id: "great-are-you-lord-bridge",
         type: "verse",
         label: "Verse",
         lyrics: "G          Em    C  G  D\nInilah rinduku kepa-da-Mu\nEm          G          F   C   D\nSegnap hatiku menyembahMu\nG           Em    C  G  D\nSeluruh jiwaku memu-ji-Mu\nEm       G          F   C   D\nKu memujaMu ya Allahku",
         repeat: "(4x)",
       },
       {
-        id: "kuberikan-hatiku-outro",
+        id: "great-are-you-lord-outro",
         type: "chorus",
         label: "Chorus",
         lyrics: "G             D          Am\nKuberikan hatiku dan jiwaku\n  C      D     G\nSemuanya bagiMu\n              D               Am\nDi dalam hidupku di setiap waktu\n   C     D    G\nNyatakan jalanMu",
