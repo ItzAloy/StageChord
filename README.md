@@ -1,73 +1,21 @@
-# React + TypeScript + Vite
+# StageChord 🎸🎤
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Aplikasi penampil chord dan lirik lagu gereja yang dirancang khusus untuk kebutuhan panggung (*stage display*). Aplikasi ini cepat, bersih dari iklan, dan sangat mudah digunakan oleh pemusik maupun *singers* langsung saat pelayanan.
 
-Currently, two official plugins are available:
+## ✨ Fitur Utama
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+*   **Top-Align Layout**: Struktur *box section* (Intro, Verse, Chorus) yang dinamis dan nempel di atas, mencegah ukuran *box* melar atau terlalu besar.
+*   **Monospace Rendering**: Posisi chord dan lirik dijamin 100% sejajar, presisi, dan anti-geser meski menggunakan spasi manual.
+*   **Transpose & Number Notation (Nashville)**: Naik-turunkan nada dasar lagu secara dinamis atau ubah tampilan chord abjad menjadi notasi angka (*number system*) secara *real-time* di panggung.
+*   **Compact Header**: Header bar yang tipis untuk memaksimalkan ruang baca lirik pada monitor panggung, lengkap dengan tombol Menu (`☰`) dan Edit (`✎`) yang tersusun vertikal di pojok kiri.
+*   **Dinamis Font-Size Adjuster**: Tombol cepat (`+` / `-`) langsung di header untuk memperbesar atau memperkecil ukuran teks secara proporsional.
+*   **Live Set (Playlist Manager)**: Atur daftar lagu yang akan dimainkan pada ibadah hari itu dengan fitur drag-and-drop.
+*   **Data Sync & Management**: Fitur ekspor langsung ke `songData.ts` untuk menyimpan perubahan lagu secara permanen di VS Code, serta fitur *Backup/Import* data via JSON.
 
-## React Compiler
+---
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## 🚀 Cara Menjalankan Project
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
-
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+### 1. Install Dependencies
+```bash
+npm install
