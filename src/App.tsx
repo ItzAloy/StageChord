@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import DashboardLayout from './DashboardLayout'
 import './App.css'
 import { songs as defaultSongs, type Song, type SongSection, type SongSectionType } from './songData'
@@ -24,6 +24,8 @@ function getSectionTypeLabel(type: SongSectionType) {
 }
 
 const songTypeOptions = [
+  'Worship',
+  'Praise',
   'Upbeat (Praise)',
   'Slowbeat (Worship)',
   'Offering',
@@ -124,6 +126,97 @@ function prefersFlats(note: string) {
   return note.includes('b')
 }
 
+function parseChordRoot(chordPart: string) {
+  const match = chordPart.trim().match(chordPattern)
+
+  if (!match) {
+    return null
+  }
+
+  return {
+    root: `${match[1]}${match[2]}`,
+    suffix: match[3],
+  }
+}
+
+function getMajorScaleRoots(key: string, preferFlats: boolean) {
+  const keyValue = noteValues[key]
+
+  if (keyValue === undefined) {
+    return []
+  }
+
+  return [0, 2, 4, 5, 7, 9, 11].map((interval) => {
+    const normalized = (keyValue + interval) % 12
+    return (preferFlats ? flatNames : sharpNames)[normalized]
+  })
+}
+
+function findScaleDegree(note: string, scaleRoots: string[]) {
+  const noteValue = noteValues[note]
+
+  if (noteValue === undefined) {
+    return -1
+  }
+
+  const index = scaleRoots.findIndex((root) => noteValues[root] === noteValue)
+  return index >= 0 ? index + 1 : -1
+}
+
+function chordToNashville(chord: string, key: string) {
+  if (!chord || chord === 'N.C.') {
+    return chord
+  }
+
+  const preferFlats = prefersFlats(key)
+  const scaleRoots = getMajorScaleRoots(key, preferFlats)
+  const [main, bass] = chord.split('/')
+  const parsed = parseChordRoot(main)
+
+  if (!parsed) {
+    return chord
+  }
+
+  const degree = findScaleDegree(parsed.root, scaleRoots)
+
+  if (degree < 0) {
+    return chord
+  }
+
+  let result = `${degree}${parsed.suffix}`
+
+  if (bass) {
+    const bassParsed = parseChordRoot(bass)
+
+    if (bassParsed) {
+      const bassDegree = findScaleDegree(bassParsed.root, scaleRoots)
+
+      if (bassDegree >= 0) {
+        result = `${degree}${parsed.suffix}/${bassDegree}${bassParsed.suffix}`
+      } else {
+        result = `${degree}${parsed.suffix}/${bass}${bassParsed.suffix}`
+      }
+    }
+  }
+
+  return result
+}
+
+function formatChordLine(chords: string[]) {
+  return chords.join('   ')
+}
+
+function formatNumberLine(chords: string[], key: string) {
+  return chords.map((chord) => chordToNashville(chord, key)).join('   ')
+}
+
+function normalizeChordTokens(chords: string[]) {
+  return chords
+    .flatMap((chord) => (chord.includes(',') ? chord.split(/[,|\s]+/) : [chord]))
+    .map((chord) => chord.trim())
+    .filter(Boolean)
+}
+
 function splitSectionContent(content: string) {
   const lines = content
     .split(/\r?\n/)
@@ -203,7 +296,9 @@ function normalizeSongSection(value: unknown): SongSection | null {
         : typeof value.measures === 'string'
           ? value.measures.split(/[,|\n]+/)
           : []
-  const chords = rawChords.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean)
+  const chords = normalizeChordTokens(
+    rawChords.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean),
+  )
   const lyrics = typeof value.lyrics === 'string' ? value.lyrics.trim() : ''
   const notation = typeof value.notation === 'string' ? value.notation.trim() : ''
   const repeat = typeof value.repeat === 'string' && value.repeat.trim() ? value.repeat.trim() : undefined
@@ -315,7 +410,7 @@ function createSongFromDraft(draft: SongDraft): Song {
         id: section.id,
         type: section.type,
         label: section.label.trim() || section.type.toUpperCase(),
-        chords: parsedContent.chords,
+        chords: normalizeChordTokens(parsedContent.chords),
         lyrics: parsedContent.lyrics,
         notation: section.notation.trim() || undefined,
         sameAs: section.sameAs.trim() || undefined,
@@ -373,22 +468,40 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('')
   const [sessionPlaylistIds, setSessionPlaylistIds] = useState<string[]>([])
   const [draggedSessionSongId, setDraggedSessionSongId] = useState<string | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const selectedSong = library[selectedSongIndex] ?? library[0] ?? defaultSongs[0]
+  const safeSongIndex = Math.min(selectedSongIndex, Math.max(0, library.length - 1))
+  const selectedSong = library[safeSongIndex] ?? library[0] ?? defaultSongs[0]
+
+  const displaySong = useMemo(() => {
+    if (composerOpen && composerMode === 'edit' && composerTargetSongId) {
+      const preview = createSongFromDraft(draft)
+
+      return { ...preview, id: composerTargetSongId }
+    }
+
+    return selectedSong
+  }, [composerMode, composerOpen, composerTargetSongId, draft, selectedSong])
 
   const transposeAmount = useMemo(
-    () => getSemitoneDistance(selectedSong.key, selectedKey),
-    [selectedSong.key, selectedKey],
+    () => getSemitoneDistance(displaySong.key, selectedKey),
+    [displaySong.key, selectedKey],
   )
 
   const renderedSections = useMemo(
     () =>
-      selectedSong.sections.map((section) => ({
-        ...section,
-        chords: section.chords.map((chord) => transposeChord(chord, transposeAmount, prefersFlats(selectedKey))),
-      })),
-    [selectedKey, selectedSong.sections, transposeAmount],
+      displaySong.sections.map((section) => {
+        const transposedChords = section.chords.map((chord) =>
+          transposeChord(chord, transposeAmount, prefersFlats(selectedKey)),
+        )
+
+        return {
+          ...section,
+          chords: transposedChords,
+          chordLine: formatChordLine(transposedChords),
+          numberLine: formatNumberLine(transposedChords, selectedKey),
+        }
+      }),
+    [displaySong.sections, selectedKey, transposeAmount],
   )
 
   const visibleSongs = useMemo(() => {
@@ -423,12 +536,16 @@ function App() {
     [library, sessionPlaylistIds],
   )
 
-  useEffect(() => {
-    window.localStorage.setItem(storageKey, JSON.stringify(library))
-  }, [library])
+  const liveSetSongs = sessionPlaylistSongs
+  const navigationSongs = liveSetSongs.length > 0 ? liveSetSongs : library
+  const navigationIndex = useMemo(() => {
+    const index = navigationSongs.findIndex((song) => song.id === selectedSong.id)
+
+    return index >= 0 ? index : 0
+  }, [navigationSongs, selectedSong.id])
 
   useEffect(() => {
-    setSessionPlaylistIds((current) => current.filter((songId) => library.some((song) => song.id === songId)))
+    window.localStorage.setItem(storageKey, JSON.stringify(library))
   }, [library])
 
   function handleSongSelect(index: number) {
@@ -494,6 +611,16 @@ function App() {
     })
   }
 
+  function handleNavigation(direction: -1 | 1) {
+    const nextIndex = (navigationIndex + direction + navigationSongs.length) % navigationSongs.length
+    const nextSong = navigationSongs[nextIndex]
+    const libraryIndex = library.findIndex((song) => song.id === nextSong.id)
+
+    if (libraryIndex >= 0) {
+      handleSongSelect(libraryIndex)
+    }
+  }
+
   function addComposerSection() {
     setDraft((current) => ({
       ...current,
@@ -514,6 +641,43 @@ function App() {
           : section,
       ),
     }))
+  }
+
+  function applySameAsSection(index: number) {
+    setDraft((current) => {
+      const section = current.sections[index]
+      const targetLabel = section.sameAs.trim()
+
+      if (!targetLabel) {
+        return current
+      }
+
+      const normalizedTarget = targetLabel.toLowerCase()
+      const source = current.sections.find(
+        (candidate, candidateIndex) =>
+          candidateIndex !== index &&
+          (candidate.label.trim().toLowerCase() === normalizedTarget ||
+            getSectionTypeLabel(candidate.type).toLowerCase() === normalizedTarget ||
+            candidate.type.toLowerCase() === normalizedTarget),
+      )
+
+      if (!source) {
+        return current
+      }
+
+      return {
+        ...current,
+        sections: current.sections.map((candidate, candidateIndex) =>
+          candidateIndex === index
+            ? {
+                ...candidate,
+                content: source.content,
+                notation: source.notation,
+              }
+            : candidate,
+        ),
+      }
+    })
   }
 
   function removeComposerSection(index: number) {
@@ -540,6 +704,7 @@ function App() {
       setLibrary((current) => {
         return current.map((song) => (song.id === targetSongId ? { ...nextSong, id: targetSongId } : song))
       })
+      setDraft(buildDraftFromSong({ ...nextSong, id: targetSongId }))
       setSelectedKey(nextSong.key)
       closeComposer()
       setComposerTargetSongId(null)
@@ -553,22 +718,6 @@ function App() {
     setDraft(defaultDraft)
     setComposerTargetSongId(null)
   }
-
-  useEffect(() => {
-    if (!composerOpen || composerMode !== 'edit' || !composerTargetSongId) {
-      return
-    }
-
-    const nextSong = createSongFromDraft(draft)
-
-    setLibrary((current) =>
-      current.map((song) => (song.id === composerTargetSongId ? { ...nextSong, id: composerTargetSongId } : song)),
-    )
-
-    if (selectedSong.id === composerTargetSongId) {
-      setSelectedKey(nextSong.key)
-    }
-  }, [composerMode, composerOpen, composerTargetSongId, draft, selectedSong.id])
 
   async function handleImportLibrary(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
@@ -616,19 +765,91 @@ function App() {
     URL.revokeObjectURL(url)
   }
 
+  function handleExportSongDataTs() {
+    const serializedSongs = library
+      .map((song) => {
+        const lines = [
+          '  {',
+          `    id: ${JSON.stringify(song.id)},`,
+          `    title: ${JSON.stringify(song.title)},`,
+          song.subtitle ? `    subtitle: ${JSON.stringify(song.subtitle)},` : null,
+          `    artist: ${JSON.stringify(song.artist)},`,
+          song.album ? `    album: ${JSON.stringify(song.album)},` : null,
+          song.songwriter ? `    songwriter: ${JSON.stringify(song.songwriter)},` : null,
+          `    language: ${JSON.stringify(song.language)},`,
+          `    key: ${JSON.stringify(song.key)},`,
+          `    songType: ${JSON.stringify(song.songType)},`,
+          `    sessionPhase: ${JSON.stringify(song.sessionPhase)},`,
+          song.tempo ? `    tempo: ${JSON.stringify(song.tempo)},` : null,
+          song.meter ? `    meter: ${JSON.stringify(song.meter)},` : null,
+          song.media && (song.media.youtubeUrl || song.media.spotifyUrl)
+            ? `    media: ${JSON.stringify(song.media, null, 2).replace(/\n/g, '\n    ')},`
+            : null,
+          '    sections: [',
+          ...song.sections.flatMap((section) => [
+            '      {',
+            `        id: ${JSON.stringify(section.id)},`,
+            `        type: ${JSON.stringify(section.type)},`,
+            `        label: ${JSON.stringify(section.label)},`,
+            `        chords: ${JSON.stringify(section.chords)},`,
+            `        lyrics: ${JSON.stringify(section.lyrics)},`,
+            section.notation ? `        notation: ${JSON.stringify(section.notation)},` : null,
+            section.sameAs ? `        sameAs: ${JSON.stringify(section.sameAs)},` : null,
+            section.repeat ? `        repeat: ${JSON.stringify(section.repeat)},` : null,
+            '      },',
+          ]),
+          '    ],',
+          '  },',
+        ]
+
+        return lines.filter((line): line is string => line !== null).join('\n')
+      })
+      .join('\n')
+
+    const fileContent = `export const songs: Song[] = [\n${serializedSongs}\n]\n`
+    const blob = new Blob([fileContent], { type: 'text/typescript' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+
+    link.href = url
+    link.download = 'songData.ts'
+    link.click()
+
+    URL.revokeObjectURL(url)
+  }
+
+  function handleResetLibrary() {
+    if (!window.confirm('Reset library ke data default dari songData.ts? Perubahan tersimpan di browser akan hilang.')) {
+      return
+    }
+
+    window.localStorage.removeItem(storageKey)
+    setLibrary(defaultSongs)
+    setSelectedSongIndex(0)
+    setSelectedKey(defaultSongs[0]?.key ?? 'C')
+    setSearchQuery('')
+    setComposerOpen(false)
+    setDraft(buildDraftFromSong(defaultSongs[0]))
+  }
+
   const sidebar = (
     <div className="sidebar-shell">
       <div className="sidebar-top">
         <div>
-          <p className="eyebrow">Library & Playlist</p>
+          <p className="eyebrow">Stage Display</p>
           <h2>StageChord</h2>
         </div>
       </div>
 
       <section className="sidebar-panel">
         <div className="panel-heading">
-          <span>Library</span>
-          <strong>{library.length} songs</strong>
+          <span>Song Bank</span>
+          <div className="panel-heading__actions">
+            <strong>{library.length}</strong>
+            <button type="button" className="sidebar-icon-button" onClick={openAddComposer} aria-label="Add song to bank">
+              +
+            </button>
+          </div>
         </div>
         <label className="search-field">
           <span className="sr-only">Search library</span>
@@ -643,7 +864,7 @@ function App() {
         <div className="song-list">
           {visibleSongs.map((song) => {
             const absoluteIndex = library.findIndex((item) => item.id === song.id)
-            const active = absoluteIndex === selectedSongIndex
+            const active = absoluteIndex === safeSongIndex
 
             return (
               <div key={song.id} className={active ? 'song-row song-row--active' : 'song-row'}>
@@ -653,8 +874,8 @@ function App() {
                   </span>
                   <span className="song-row__subtle">{song.artist}</span>
                 </button>
-                <button type="button" className="song-row__action" onClick={() => addSongToSessionPlaylist(song.id)}>
-                  + Add
+                <button type="button" className="song-row__action" onClick={() => addSongToSessionPlaylist(song.id)} aria-label={`Add ${song.title} to live set`}>
+                  +
                 </button>
               </div>
             )
@@ -666,19 +887,21 @@ function App() {
 
       <section className="sidebar-panel sidebar-panel--playlist">
         <div className="panel-heading">
-          <span>This Session Playlist</span>
+          <span>Live Set</span>
           <div className="panel-heading__actions">
-            <strong>{sessionPlaylistIds.length} songs</strong>
-            <button type="button" className="playlist-clear-button" onClick={clearSessionPlaylist}>
-              Clear
-            </button>
+            <strong>{sessionPlaylistSongs.length}</strong>
+            {sessionPlaylistSongs.length > 0 ? (
+              <button type="button" className="playlist-clear-button" onClick={clearSessionPlaylist}>
+                Clear
+              </button>
+            ) : null}
           </div>
         </div>
 
         <div className="playlist-groups">
           {sessionPlaylistSongs.length > 0 ? (
             sessionPlaylistSongs.map((song) => {
-              const active = library[selectedSongIndex]?.id === song.id
+              const active = library[safeSongIndex]?.id === song.id
 
               return (
                 <button
@@ -705,23 +928,10 @@ function App() {
               )
             })
           ) : (
-            <div className="empty-state">No songs in this service yet. Add from Library.</div>
+            <div className="empty-state">Tambah lagu dari Song Bank untuk sesi ini.</div>
           )}
         </div>
       </section>
-
-      <div className="sidebar-actions">
-        <button type="button" className="ghost" onClick={openEditComposer}>
-          ⚙️ SETTINGS
-        </button>
-        <button type="button" className="ghost" onClick={handleExportLibrary}>
-          ⬇️ EXPORT LIBRARY
-        </button>
-        <button type="button" onClick={openAddComposer}>
-          ➕ CREATE A NEW SONG
-        </button>
-        <input ref={fileInputRef} type="file" accept="application/json" onChange={handleImportLibrary} hidden />
-      </div>
     </div>
   )
   
@@ -731,21 +941,24 @@ function App() {
         <button type="button" className="icon-button header-menu-button" onClick={() => setSidebarOpen((current) => !current)} aria-label="Toggle sidebar">
           ☰
         </button>
+        <button type="button" className="icon-button header-edit-button" onClick={openEditComposer} aria-label="Edit current song">
+          ✎
+        </button>
         <div>
           <p className="eyebrow">Now Showing</p>
           <h1>
-            {selectedSong.title}
-            {selectedSong.subtitle ? <span> - {selectedSong.subtitle}</span> : null}
+            {displaySong.title}
+            {displaySong.subtitle ? <span> - {displaySong.subtitle}</span> : null}
           </h1>
           <p className="header-subtitle">
-            {selectedSong.artist}
+            {displaySong.artist}
           </p>
         </div>
       </div>
 
       <div className="header-key">
         <span>Key</span>
-        <strong>{selectedSong.key}</strong>
+        <strong>{selectedKey}</strong>
       </div>
 
       <div className="header-meta">
@@ -777,22 +990,15 @@ function App() {
 
   const footer = (
     <div className="footer-bar">
-      <button
-        type="button"
-        className="ghost"
-        onClick={() => handleSongSelect((selectedSongIndex - 1 + library.length) % library.length)}
-      >
-        Previous Song
+      <button type="button" className="ghost" onClick={() => handleNavigation(-1)}>
+        Previous
       </button>
       <span className="footer-counter">
-        {selectedSongIndex + 1} / {library.length}
+        {navigationIndex + 1} / {navigationSongs.length}
+        {liveSetSongs.length > 0 ? <small className="footer-mode">Live Set</small> : null}
       </span>
-      <button
-        type="button"
-        className="ghost"
-        onClick={() => handleSongSelect((selectedSongIndex + 1) % library.length)}
-      >
-        Next Song
+      <button type="button" className="ghost" onClick={() => handleNavigation(1)}>
+        Next
       </button>
     </div>
   )
@@ -801,8 +1007,8 @@ function App() {
     <div className="composer-backdrop" role="presentation" onClick={closeComposer}>
       <form className="composer-drawer" onSubmit={handleComposerSubmit} onClick={(event) => event.stopPropagation()}>
       <div className="panel-heading panel-heading--stacked">
-        <span>{composerMode === 'edit' ? 'Edit Song' : 'Create a New Song'}</span>
-        <strong>{composerMode === 'edit' ? 'Modify existing lyrics / music' : 'Structured song schema'}</strong>
+        <span>{composerMode === 'edit' ? 'Edit Lagu' : 'Tambah Lagu'}</span>
+        <strong>{composerMode === 'edit' ? 'Perubahan tersimpan otomatis setelah Save' : 'Masuk ke Song Bank'}</strong>
       </div>
 
       <section className="composer-section-block">
@@ -839,7 +1045,16 @@ function App() {
         <div className="composer-grid composer-grid--three">
           <label>
             Default Key
-            <input value={draft.key} onChange={(event) => setDraft((current) => ({ ...current, key: event.target.value }))} />
+            <input
+              value={draft.key}
+              onChange={(event) => {
+                const key = event.target.value
+                setDraft((current) => ({ ...current, key }))
+                if (composerMode === 'edit') {
+                  setSelectedKey(key)
+                }
+              }}
+            />
           </label>
           <label>
             Song Type
@@ -903,7 +1118,16 @@ function App() {
                       rows={6}
                       value={section.content}
                       onChange={(event) => updateComposerSection(index, 'content', event.target.value)}
-                      placeholder={'C, G, Am, F\nLyrics here'}
+                      placeholder={'C   G   Am   F\nLyrics here'}
+                    />
+                  </label>
+
+                  <label>
+                    Rhythm notation (opsional)
+                    <input
+                      value={section.notation}
+                      onChange={(event) => updateComposerSection(index, 'notation', event.target.value)}
+                      placeholder='e.g. | 1 • 2 | • • 3 4 |'
                     />
                   </label>
 
@@ -915,7 +1139,7 @@ function App() {
                         onChange={(event) => updateComposerSection(index, 'sameAs', event.target.value)}
                         placeholder='e.g. "Intro", "Verse 1"'
                       />
-                      <button type="button" className="small-button">
+                      <button type="button" className="small-button" onClick={() => applySameAsSection(index)}>
                         confirm
                       </button>
                     </div>
@@ -943,7 +1167,7 @@ function App() {
       </section>
 
       <button type="submit" className="submit-button">
-        Submit Song
+        Save
       </button>
       </form>
     </div>
@@ -958,8 +1182,10 @@ function App() {
 
             <div className="section-body">
               <div className="chord-line" aria-label={`${section.label} chords`}>
-                {showNotation && section.notation ? section.notation : section.chords.join('   ')}
+                {showNotation ? section.numberLine : section.chordLine}
               </div>
+
+              {section.notation ? <div className="notation-line">{section.notation}</div> : null}
 
               {showLyrics && section.lyrics ? <p className="lyric-line">{section.lyrics}</p> : null}
 
